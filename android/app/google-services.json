@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "759431833363",
+    "project_id": "login-signup-1bae5",
+    "storage_bucket": "login-signup-1bae5.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:759431833363:android:81d1e88b59dab35e66dce6",
+        "android_client_info": {
+          "package_name": "com.example.medical_intervention_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB1j4Yv2K2QbDqwE0S4OU0PO_s9V24PPww"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:759431833363:android:c255c0909e523d6566dce6",
+        "android_client_info": {
+          "package_name": "com.example.login_signup"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB1j4Yv2K2QbDqwE0S4OU0PO_s9V24PPww"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
