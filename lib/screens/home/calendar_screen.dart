@@ -1,6 +1,8 @@
 import 'dart:convert';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:medical_intervention_app/models/user.dart';
 import 'package:provider/provider.dart';
 import 'package:table_calendar/table_calendar.dart';
 import 'package:intl/intl.dart';
@@ -8,9 +10,9 @@ import 'package:intl/date_symbol_data_local.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_staggered_animations/flutter_staggered_animations.dart';
 import 'package:liquid_pull_to_refresh/liquid_pull_to_refresh.dart';
-
 import '../../models/intervention.dart';
 import '../../models/notification.dart';
+// Import AppUser
 import '../../services/intervention_service.dart';
 import '../../services/notification_service.dart';
 import '../../widgets/intervention_card.dart';
@@ -18,7 +20,8 @@ import 'intervention_detail.dart';
 import 'intervention_form.dart';
 
 class CalendarScreen extends StatefulWidget {
-   const CalendarScreen({Key? key}) : super(key: key);
+  const CalendarScreen({Key? key}) : super(key: key);
+
   @override
   _CalendarScreenState createState() => _CalendarScreenState();
 }
@@ -40,6 +43,8 @@ class _CalendarScreenState extends State<CalendarScreen> with SingleTickerProvid
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
   late Animation<double> _scaleAnimation;
+  AppUser? _currentUser; // Store current user
+  String? _userErrorMessage; // Store user loading errors
 
   @override
   void initState() {
@@ -48,6 +53,7 @@ class _CalendarScreenState extends State<CalendarScreen> with SingleTickerProvid
     _initializeDateFormatting();
     _loadInterventions();
     _loadNotifications();
+    _loadCurrentUser(); // Load user role
 
     _animationController = AnimationController(
       vsync: this,
@@ -79,6 +85,79 @@ class _CalendarScreenState extends State<CalendarScreen> with SingleTickerProvid
 
   Future<void> _initializeDateFormatting() async {
     await initializeDateFormatting('fr_FR', null);
+  }
+
+  Future<void> _loadCurrentUser() async {
+    setState(() {
+      _isLoading = true;
+      _userErrorMessage = null;
+    });
+    debugPrint('[DEBUG] Starting user load');
+    try {
+      final firebaseUser = FirebaseAuth.instance.currentUser;
+      if (firebaseUser == null) {
+        debugPrint('[ERROR] No Firebase user logged in');
+        setState(() {
+          _isLoading = false;
+          _userErrorMessage = 'Aucun utilisateur connecté';
+        });
+        return;
+      }
+
+      debugPrint('[DEBUG] Firebase user found: ${firebaseUser.uid}');
+      final userData = await _fetchUserData(firebaseUser.uid);
+      if (userData.isEmpty) {
+        debugPrint('[ERROR] No user data found for UID: ${firebaseUser.uid}');
+        setState(() {
+          _isLoading = false;
+          _userErrorMessage = 'Données utilisateur introuvables';
+          _currentUser = null;
+        });
+        return;
+      }
+
+      setState(() {
+        _currentUser = AppUser.fromFirebase(firebaseUser, userData);
+        _isLoading = false;
+        debugPrint('[DEBUG] User loaded: ${_currentUser!.displayName}, Role: ${_currentUser!.role}');
+      });
+    } catch (e) {
+      debugPrint('[ERROR] Failed to load user: $e');
+      setState(() {
+        _isLoading = false;
+        _userErrorMessage = 'Erreur de chargement: $e';
+        _currentUser = null;
+      });
+    }
+  }
+
+  Future<Map<String, dynamic>> _fetchUserData(String uid) async {
+    try {
+      debugPrint('[DEBUG] Fetching user data for UID: $uid');
+      final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+      if (!doc.exists) {
+        debugPrint('[ERROR] User document does not exist for UID: $uid');
+        return {};
+      }
+      final data = doc.data()!;
+      debugPrint('[DEBUG] User data fetched: $data');
+      return data;
+    } catch (e) {
+      debugPrint('[ERROR] Failed to fetch user data: $e');
+      return {};
+    }
+  }
+
+  bool _canShowInterventionButton() {
+    if (_currentUser == null) {
+      debugPrint('[DEBUG] No user loaded, hiding intervention button');
+      return false;
+    }
+    final role = _currentUser!.role.toUpperCase().trim();
+    debugPrint('[DEBUG] Checking role for intervention button: $role');
+    final canShow = role == 'MEDECIN';
+    debugPrint('[DEBUG] Can show intervention button: $canShow');
+    return canShow;
   }
 
   Future<void> _loadInterventions() async {
@@ -134,13 +213,13 @@ class _CalendarScreenState extends State<CalendarScreen> with SingleTickerProvid
       final user = FirebaseAuth.instance.currentUser;
       if (user != null) {
         final notificationService = Provider.of<NotificationService>(context, listen: false);
-        final unread = await notificationService.getUserNotifications(user.uid);
+        final notifications = await notificationService.getUserNotifications(user.uid);
         final read = await _loadReadNotifications();
 
         setState(() {
-          _notifications = [...unread, ...read];
+          _notifications = [...notifications, ...read];
           _readNotifications = read;
-          _unreadCount = unread.length;
+          _unreadCount = notifications.where((n) => !n.read).length;
         });
       }
     } catch (e) {
@@ -160,11 +239,9 @@ class _CalendarScreenState extends State<CalendarScreen> with SingleTickerProvid
       final notificationService = Provider.of<NotificationService>(context, listen: false);
       await notificationService.markAllAsRead(user.uid);
 
-      final newlyRead = _notifications.where((n) => !n.read).map((n) => n.copyWith(read: true)).toList();
-
       setState(() {
-        _readNotifications = [..._readNotifications, ...newlyRead];
         _notifications = _notifications.map((n) => n.copyWith(read: true)).toList();
+        _readNotifications = _notifications;
         _unreadCount = 0;
       });
 
@@ -176,12 +253,12 @@ class _CalendarScreenState extends State<CalendarScreen> with SingleTickerProvid
 
   void _updateSelectedInterventions() {
     if (_selectedDay == null) return;
-    
+
     setState(() {
       _selectedInterventions = _interventions.where((intervention) {
         return intervention.date.year == _selectedDay!.year &&
-               intervention.date.month == _selectedDay!.month &&
-               intervention.date.day == _selectedDay!.day;
+            intervention.date.month == _selectedDay!.month &&
+            intervention.date.day == _selectedDay!.day;
       }).toList();
     });
   }
@@ -213,7 +290,7 @@ class _CalendarScreenState extends State<CalendarScreen> with SingleTickerProvid
         await notificationService.markNotificationAsRead(notification.id);
 
         final updatedNotification = notification.copyWith(read: true);
-        
+
         setState(() {
           _notifications = _notifications
               .map((n) => n.id == notification.id ? updatedNotification : n)
@@ -263,6 +340,7 @@ class _CalendarScreenState extends State<CalendarScreen> with SingleTickerProvid
     await Future.wait([
       _loadInterventions(),
       _loadNotifications(),
+      _loadCurrentUser(), // Refresh user role
     ]);
   }
 
@@ -342,11 +420,10 @@ class _CalendarScreenState extends State<CalendarScreen> with SingleTickerProvid
         showChildOpacityTransition: false,
         child: Stack(
           children: [
-            // Background image with overlay
             Container(
               decoration: BoxDecoration(
                 image: DecorationImage(
-                  image: AssetImage('assets/images/medical_bg.jpg'),
+                  image: AssetImage('assets/image/medical_bg.jpg'),
                   fit: BoxFit.cover,
                 ),
               ),
@@ -354,8 +431,6 @@ class _CalendarScreenState extends State<CalendarScreen> with SingleTickerProvid
             Container(
               color: Colors.black.withOpacity(0.3),
             ),
-            
-            // Main content
             FadeTransition(
               opacity: _fadeAnimation,
               child: ScaleTransition(
@@ -363,8 +438,22 @@ class _CalendarScreenState extends State<CalendarScreen> with SingleTickerProvid
                 child: Column(
                   children: [
                     SizedBox(height: kToolbarHeight + 20),
-                    
-                    // Calendar Card
+                    if (_userErrorMessage != null)
+                      Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        child: Text(
+                          _userErrorMessage!,
+                          style: TextStyle(color: Colors.red[200], fontSize: 16, fontStyle: FontStyle.italic),
+                        ),
+                      ),
+                    if (_currentUser != null)
+                      Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        child: Text(
+                          'Rôle actuel: ${_currentUser!.role}',
+                          style: TextStyle(color: Colors.white, fontSize: 16),
+                        ),
+                      ),
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 16.0),
                       child: Card(
@@ -433,12 +522,12 @@ class _CalendarScreenState extends State<CalendarScreen> with SingleTickerProvid
                                 markerBuilder: (context, date, events) {
                                   final count = _interventions.where((i) {
                                     return i.date.year == date.year &&
-                                           i.date.month == date.month &&
-                                           i.date.day == date.day;
+                                        i.date.month == date.month &&
+                                        i.date.day == date.day;
                                   }).length;
-                                  
+
                                   if (count == 0) return SizedBox.shrink();
-                                  
+
                                   return Positioned(
                                     right: 1,
                                     bottom: 1,
@@ -465,10 +554,7 @@ class _CalendarScreenState extends State<CalendarScreen> with SingleTickerProvid
                         ),
                       ),
                     ),
-                    
                     SizedBox(height: 16),
-                    
-                    // Date Title
                     Padding(
                       padding: EdgeInsets.symmetric(horizontal: 16),
                       child: Container(
@@ -497,10 +583,7 @@ class _CalendarScreenState extends State<CalendarScreen> with SingleTickerProvid
                         ),
                       ),
                     ),
-                    
                     SizedBox(height: 16),
-                    
-                    // Interventions List
                     Expanded(
                       child: _selectedInterventions.isEmpty
                           ? Center(
@@ -557,12 +640,18 @@ class _CalendarScreenState extends State<CalendarScreen> with SingleTickerProvid
                               ),
                             ),
                     ),
+                    if (_errorMessage.isNotEmpty)
+                      Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        child: Text(
+                          _errorMessage,
+                          style: TextStyle(color: Colors.red[200], fontSize: 16, fontStyle: FontStyle.italic),
+                        ),
+                      ),
                   ],
                 ),
               ),
             ),
-            
-            // Notifications Panel
             if (_showNotifications)
               Positioned.fill(
                 child: GestureDetector(
@@ -571,7 +660,7 @@ class _CalendarScreenState extends State<CalendarScreen> with SingleTickerProvid
                     color: Colors.black.withOpacity(0.4),
                     child: Center(
                       child: GestureDetector(
-                        onTap: () {}, // Prevent click-through
+                        onTap: () {},
                         child: Padding(
                           padding: const EdgeInsets.all(16.0),
                           child: Material(
@@ -593,7 +682,6 @@ class _CalendarScreenState extends State<CalendarScreen> with SingleTickerProvid
                               ),
                               child: Column(
                                 children: [
-                                  // Header
                                   Container(
                                     padding: EdgeInsets.all(16),
                                     decoration: BoxDecoration(
@@ -638,8 +726,11 @@ class _CalendarScreenState extends State<CalendarScreen> with SingleTickerProvid
                                                 return DropdownMenuItem<String>(
                                                   value: value,
                                                   child: Text(
-                                                    value == 'all' ? 'Toutes' : 
-                                                    value == 'unread' ? 'Non lues' : 'Lues',
+                                                    value == 'all'
+                                                        ? 'Toutes'
+                                                        : value == 'unread'
+                                                            ? 'Non lues'
+                                                            : 'Lues',
                                                     style: TextStyle(fontSize: 16),
                                                   ),
                                                 );
@@ -650,7 +741,6 @@ class _CalendarScreenState extends State<CalendarScreen> with SingleTickerProvid
                                       ],
                                     ),
                                   ),
-                                  
                                   if (_notifications.isNotEmpty && _notificationFilter == 'unread' && _unreadCount > 0)
                                     Padding(
                                       padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8),
@@ -680,8 +770,6 @@ class _CalendarScreenState extends State<CalendarScreen> with SingleTickerProvid
                                         ),
                                       ),
                                     ),
-                                  
-                                  // Notifications list
                                   Expanded(
                                     child: _isLoadingNotifications
                                         ? Center(
@@ -692,11 +780,11 @@ class _CalendarScreenState extends State<CalendarScreen> with SingleTickerProvid
                                         : filteredNotifications.isEmpty
                                             ? Center(
                                                 child: Text(
-                                                  _notificationFilter == 'unread' 
-                                                    ? 'Aucune notification non lue' 
-                                                    : _notificationFilter == 'read'
-                                                      ? 'Aucune notification lue'
-                                                      : 'Aucune notification',
+                                                  _notificationFilter == 'unread'
+                                                      ? 'Aucune notification non lue'
+                                                      : _notificationFilter == 'read'
+                                                          ? 'Aucune notification lue'
+                                                          : 'Aucune notification',
                                                   style: TextStyle(fontSize: 16, color: Colors.grey),
                                                 ),
                                               )
@@ -739,12 +827,12 @@ class _CalendarScreenState extends State<CalendarScreen> with SingleTickerProvid
                                                                                   notification.title,
                                                                                   style: TextStyle(
                                                                                     fontSize: 18,
-                                                                                    fontWeight: notification.read 
-                                                                                      ? FontWeight.normal 
-                                                                                      : FontWeight.bold,
-                                                                                    color: notification.read 
-                                                                                      ? Colors.grey[600] 
-                                                                                      : Colors.black,
+                                                                                    fontWeight: notification.read
+                                                                                        ? FontWeight.normal
+                                                                                        : FontWeight.bold,
+                                                                                    color: notification.read
+                                                                                        ? Colors.grey[600]
+                                                                                        : Colors.black,
                                                                                   ),
                                                                                 ),
                                                                                 SizedBox(height: 8),
@@ -752,25 +840,28 @@ class _CalendarScreenState extends State<CalendarScreen> with SingleTickerProvid
                                                                                   notification.message,
                                                                                   style: TextStyle(
                                                                                     fontSize: 16,
-                                                                                    color: notification.read 
-                                                                                      ? Colors.grey 
-                                                                                      : Colors.black87,
+                                                                                    color: notification.read
+                                                                                        ? Colors.grey
+                                                                                        : Colors.black87,
                                                                                   ),
                                                                                 ),
                                                                               ],
                                                                             ),
                                                                           ),
                                                                           if (!notification.read)
-                                                                            Icon(Icons.brightness_1, size: 12, color: Colors.red),
+                                                                            Icon(Icons.brightness_1,
+                                                                                size: 12, color: Colors.red),
                                                                         ],
                                                                       ),
                                                                       SizedBox(height: 12),
                                                                       Row(
                                                                         children: [
-                                                                          Icon(Icons.access_time, size: 16, color: Colors.grey),
+                                                                          Icon(Icons.access_time,
+                                                                              size: 16, color: Colors.grey),
                                                                           SizedBox(width: 4),
                                                                           Text(
-                                                                            DateFormat('dd/MM/yyyy HH:mm').format(notification.timestamp),
+                                                                            DateFormat('dd/MM/yyyy HH:mm')
+                                                                                .format(notification.timestamp),
                                                                             style: TextStyle(
                                                                               fontSize: 14,
                                                                               color: Colors.grey,
@@ -778,7 +869,8 @@ class _CalendarScreenState extends State<CalendarScreen> with SingleTickerProvid
                                                                           ),
                                                                           Spacer(),
                                                                           if (notification.read)
-                                                                            Icon(Icons.check_circle, size: 18, color: Colors.green),
+                                                                            Icon(Icons.check_circle,
+                                                                                size: 18, color: Colors.green),
                                                                         ],
                                                                       ),
                                                                     ],
@@ -807,18 +899,21 @@ class _CalendarScreenState extends State<CalendarScreen> with SingleTickerProvid
           ],
         ),
       ),
-      floatingActionButton: ScaleTransition(
-        scale: _scaleAnimation,
-        child: FloatingActionButton(
-          onPressed: () {
-            Navigator.pushNamed(context, InterventionFormScreen.routeName);
-          },
-          child: Icon(Icons.add),
-          backgroundColor: theme.primaryColor,
-          elevation: 8,
-          tooltip: 'Nouvelle intervention',
-        ),
-      ),
+      floatingActionButton: _canShowInterventionButton()
+          ? ScaleTransition(
+              scale: _scaleAnimation,
+              child: FloatingActionButton.extended(
+                onPressed: () {
+                  Navigator.pushNamed(context, InterventionFormScreen.routeName);
+                },
+                icon: Icon(Icons.add),
+                label: Text('Demande d\'intervention'),
+                backgroundColor: theme.primaryColor,
+                elevation: 8,
+                tooltip: 'Nouvelle intervention',
+              ),
+            )
+          : null,
     );
   }
 }

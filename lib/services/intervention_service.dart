@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'package:http/http.dart' as client;
+import 'package:medical_intervention_app/models/Patient.dart';
+
 import '../models/medical_staff.dart';
 import 'dart:convert';
 import '../models/intervention.dart';
@@ -47,7 +48,7 @@ Future<List<Intervention>> getInterventionsByStaff(String firebaseUid) async {
     rethrow;
   }
 }
-Future<void> createInterventionWithRoomAndUser(Map<String, dynamic> intervention) async {
+Future<void> createInterventionWithRoomAndUser(Map<String, dynamic> intervention, int id) async {
     final response = await http.post(
       Uri.parse('$_baseUrl/api/interventions/with-room-and-user'),
       headers: {
@@ -61,24 +62,46 @@ Future<void> createInterventionWithRoomAndUser(Map<String, dynamic> intervention
       throw Exception('Failed to create intervention: ${response.body}');
     }
   }
-
-Future<List<String>> getInterventionTypes() async {
-  final response = await http.get(Uri.parse('$_baseUrl/intervention-types'));
-  if (response.statusCode == 200) {
-    return List<String>.from(json.decode(response.body));
+  Future<List<String>> getInterventionTypes() async {
+    final response = await http.get(Uri.parse('$_baseUrl/interventions/types'));
+    if (response.statusCode == 200) {
+      return List<String>.from(jsonDecode(response.body));
+    } else {
+      throw Exception('Failed to load intervention types');
+    }
   }
-  throw Exception('Failed to load intervention types');
-}
+
+
+  
 
 Future<List<MedicalStaff>> getMedicalStaffByRole(String role) async {
-  final response = await http.get(Uri.parse('$_baseUrl/medical-staff/role/$role'));
-  if (response.statusCode == 200) {
-    return (json.decode(response.body) as List)
-        .map((json) => MedicalStaff.fromJson(json))
-        .toList();
+    final response = await http.get(Uri.parse('$_baseUrl/medical-staff/by-role/$role'));
+    if (response.statusCode == 200) {
+      final List<dynamic> data = jsonDecode(response.body);
+      return data.map((json) => MedicalStaff.fromJson(json)).toList();
+    } else {
+      throw Exception('Failed to load medical staff for role $role');
+    }
   }
-  throw Exception('Failed to load medical staff');
-}
+  Future<MedicalStaff> getDoctorInfo(String firebaseUid) async {
+    final response = await http.get(Uri.parse('$_baseUrl/medical-staff/by-firebase/$firebaseUid'));
+    if (response.statusCode == 200) {
+      return MedicalStaff.fromJson(json.decode(response.body));
+    }
+    throw Exception('Failed to load doctor info');
+  }
+  Future<Map<String, List<MedicalStaff>>> getCompatibleStaffByType(String interventionType) async {
+    final response = await http.get(Uri.parse('$_baseUrl/medical-staff/compatible?type=$interventionType'));
+    if (response.statusCode == 200) {
+      final data = json.decode(response.body);
+      return {
+        'MEDECIN': (data['MEDECIN'] as List).map((e) => MedicalStaff.fromJson(e)).toList(),
+        'ANESTHESISTE': (data['ANESTHESISTE'] as List).map((e) => MedicalStaff.fromJson(e)).toList(),
+        'INFIRMIER': (data['INFIRMIER'] as List).map((e) => MedicalStaff.fromJson(e)).toList(),
+      };
+    }
+    throw Exception('Failed to load compatible staff');
+  }
   Future<Intervention> createIntervention(Map<String, dynamic> data) async {
     final response = await http.post(
       Uri.parse('$_baseUrl/interventions'),
@@ -115,6 +138,39 @@ Future<Rapport?> getRapportByIntervention(int interventionId) async {
   }
 }
 
+Future<List<MedicalStaff>> getMedicalStaffByRoleAndType(String role, String interventionType) async {
+  final response = await http.get(Uri.parse(
+      'http://10.0.2.2:8089/api/medical-staff/by-role/$role?interventionType=$interventionType'));
+  if (response.statusCode == 200) {
+    final List<dynamic> data = jsonDecode(response.body);
+    return data.map((json) => MedicalStaff.fromJson(json)).toList();
+  }
+  throw Exception('Failed to load medical staff');
+}
+
+Future<List<Patient>> searchPatients(String query) async {
+  final response = await http.get(Uri.parse(
+      'http://10.0.2.2:8089/api/patients/search?q=$query'));
+  if (response.statusCode == 200) {
+    final List<dynamic> data = jsonDecode(response.body);
+    return data.map((json) => Patient.fromJson(json)).toList();
+  }
+  throw Exception('Failed to search patients');
+}
+
+Future<void> createInterventionWithPatient(Map<String, dynamic> payload, int userId) async {
+  final response = await http.post(
+    Uri.parse('http://10.0.2.2:8089/api/interventions/with-patient'),
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Current-User-ID': userId.toString(),
+    },
+    body: jsonEncode(payload),
+  );
+  if (response.statusCode != 201) {
+    throw Exception(jsonDecode(response.body)['message'] ?? 'Failed to create intervention');
+  }
+}
   Future<Rapport> createRapport(
   int interventionId,
   int userId,
@@ -153,6 +209,20 @@ Future<Rapport?> getRapportByIntervention(int interventionId) async {
     throw Exception('Error creating report: $e');
   }
 }
+Future<List<Rapport>> getRapportsByStaff(int staffId, String s) async {
+  final response = await http.get(
+    Uri.parse('$_baseUrl/rapports-postoperatoires/by-staff/$staffId'),
+    headers: {'Content-Type': 'application/json'},
+  );
+
+  if (response.statusCode == 200) {
+    final List<dynamic> data = json.decode(response.body);
+    return data.map((json) => Rapport.fromJson(json)).toList();
+  } else {
+    throw Exception('Échec du chargement des rapports: ${response.statusCode}');
+  }
+}
+
   Future<Rapport> updateRapport(
   int rapportId,
   Map<String, dynamic> rapportData,

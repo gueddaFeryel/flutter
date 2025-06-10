@@ -9,6 +9,8 @@ class AppUser {
   final String role;
   final bool isAdmin;
   final bool isApproved;
+  final String? image; // Nouveau champ pour l'URL de l'image
+  final String? specialty;
 
   AppUser({
     required this.id,
@@ -19,6 +21,8 @@ class AppUser {
     required this.role,
     this.isAdmin = false,
     this.isApproved = false,
+    this.image, // Initialisation optionnelle
+     this.specialty, // Ajouté
   });
 
   factory AppUser.fromFirebase(User user, Map<String, dynamic> data) {
@@ -31,6 +35,9 @@ class AppUser {
       role: data['role']?.toString().toUpperCase() ?? 'USER',
       isAdmin: data['is_admin'] == true,
       isApproved: data['isApproved'] == true,
+      image: data['image'], // Récupération de l'URL de l'image depuis les données
+        specialty: data['specialty'] as String?, // Ajouté
+      
     );
   }
 
@@ -65,6 +72,32 @@ class AppUser {
       'role': role,
       'is_admin': isAdmin,
       'isApproved': isApproved,
+      'image': image, // Ajout de l'image dans la sérialisation
     };
+  }
+
+  // Méthode pour créer une copie avec des valeurs modifiées
+  AppUser copyWith({
+    int? id,
+    String? firebaseUid,
+    String? email,
+    String? firstName,
+    String? lastName,
+    String? role,
+    bool? isAdmin,
+    bool? isApproved,
+    String? image,
+  }) {
+    return AppUser(
+      id: id ?? this.id,
+      firebaseUid: firebaseUid ?? this.firebaseUid,
+      email: email ?? this.email,
+      firstName: firstName ?? this.firstName,
+      lastName: lastName ?? this.lastName,
+      role: role ?? this.role,
+      isAdmin: isAdmin ?? this.isAdmin,
+      isApproved: isApproved ?? this.isApproved,
+      image: image ?? this.image,
+    );
   }
 }

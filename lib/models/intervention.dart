@@ -9,11 +9,11 @@ class Intervention {
   final DateTime? startTime;
   final DateTime? endTime;
   final String status;
-  final OperatingRoom? room;
+   OperatingRoom? room;
   final Set<MedicalStaff>? medicalTeam;
   final List<Materiel>? materiels;
   final String? notes;
-  final String? roomId;
+  final int? roomId;
   final Patient? patient;
   Intervention({
     required this.id,
@@ -39,7 +39,7 @@ class Intervention {
       endTime: json['endTime'] != null ? DateTime.parse(json['endTime']) : null,
       status: json['statut']?.toString() ?? 'DEMANDE',
       room: json['room'] != null ? OperatingRoom.fromJson(json['room']) : null,
-      roomId: json['roomId']?.toString(),
+      roomId: json['roomId'] as int,
       medicalTeam: json['equipeMedicale'] != null
           ? (json['equipeMedicale'] as List)
               .map((e) => MedicalStaff.fromJson(e))

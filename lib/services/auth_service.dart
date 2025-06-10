@@ -34,6 +34,8 @@ class AuthService {
     });
   }
 
+User? get currentUser => _auth.currentUser;
+
   Future<AppUser?> getCurrentUser() async {
     final user = _auth.currentUser;
     if (user == null) return null;
